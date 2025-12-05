@@ -1,9 +1,9 @@
 # CS 686 project
 # Minimal setup
 
-Make sure the problemset folder is in the same directory as the .py file. \
-Specify the folder name in the .py file's main section. \
-Run
+1. Make sure the problemset folder is in the same directory as the .py file. \
+2. Specify the folder name in the .py file's main section. \
+3. Run
 
 
 ## Problemsets
