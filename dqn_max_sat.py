@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 
 class MaxSatEnvironment:
     def __init__(self, weights, clauses):
-        self.weights = weights
         self.clauses = clauses
         self.num_vars = len(weights)
         self.num_clauses = len(clauses)
@@ -70,24 +69,14 @@ class MaxSatEnvironment:
 
         unsat_fraction = (self.num_clauses - self.satisfied) / self.num_clauses
 
-        # Normalize counts by maximum possible occurrences for this variable
-        max_occ = max(1, len(self.var_occ[var]))
-        make_norm = make / max_occ
-        brk_norm = brk / max_occ
-        weighted_sat_improv_norm = weighted_sat_improv / max_occ
-        make_break_diff_norm = (make - brk) / max_occ
-        clause_occ_norm = len(self.var_occ[var]) / max_occ
-        old_val_norm = old_val  # 0 or 1
-        new_val_norm = 1 - old_val
-
         return np.array([
-            make_norm,
-            brk_norm,
-            weighted_sat_improv_norm,
-            old_val_norm,
-            new_val_norm,
-            clause_occ_norm,
-            make_break_diff_norm,
+            make,
+            brk,
+            weighted_sat_improv,
+            old_val,
+            1 - old_val,
+            len(self.var_occ[var]),
+            make - brk,
             unsat_fraction
         ], dtype=np.float32)
 
@@ -97,7 +86,6 @@ class MaxSatEnvironment:
 
     def full_state(self):
         return np.array([self.variable_features(v) for v in range(self.num_vars)])
-
 
 
 class ReplayBuffer:
@@ -120,6 +108,7 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.buf)
+
 
 class QNet(nn.Module):
     def __init__(self, in_dim):
@@ -189,12 +178,6 @@ class DQNAgent:
             self.target.load_state_dict(self.q.state_dict())
         return loss.item()
 
-    def feature_importances(self):
-        with torch.no_grad():
-            weights = self.q.net[0].weight.abs().mean(dim=0).cpu().numpy()
-            return weights
-
-
 
 def solve_instance(agent, w, c, max_flips=5000):
     env = MaxSatEnvironment(w, c)
@@ -234,8 +217,8 @@ def solve_instance(agent, w, c, max_flips=5000):
 
     agent.eps = max(agent.eps_min, agent.eps * agent.eps_decay)
     avg_loss = total_loss / loss_count if loss_count > 0 else 0
-    feat_importances = agent.feature_importances()
-    return best_sat, flip + 1, avg_loss, feat_importances
+    return best_sat, flip + 1, avg_loss
+
 
 def read_input(filename):
     weights = []
@@ -248,16 +231,17 @@ def read_input(filename):
             continue
         if line.startswith("w"):
             parts = list(map(int, line.split()[1:]))
-            if parts[-1] == 0:  # remove trailing 0
+            if parts[-1] == 0:
                 parts = parts[:-1]
             weights = parts
         else:
             parts = list(map(int, line.split()))
-            if parts[-1] == 0:  # remove trailing 0 from clause
+            if parts[-1] == 0:
                 parts = parts[:-1]
             if parts:
                 clauses.append(parts)
     return weights, clauses
+
 
 
 def plot_cumulative(data, title, xlabel, ylabel, output_file, epoch_starts=None):
@@ -287,6 +271,7 @@ def plot_histogram(data, title, xlabel, ylabel, output_file, bin_width=1):
     plt.close()
 
 
+
 def run_folder(folder, num_vars, max_flips=5000, num_epochs=2, save_weights=True):
     agent = DQNAgent(num_vars=num_vars)
     files = sorted([os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".mwcnf")])
@@ -302,15 +287,16 @@ def run_folder(folder, num_vars, max_flips=5000, num_epochs=2, save_weights=True
     for epoch in range(num_epochs):
         epoch_start_index = len(cumulative_flips) + 1
         epoch_starts.append(epoch_start_index)
+
         if epoch > 0:
-            agent.eps = 1.0  # reset exploration at start of new epoch
+            agent.eps = 0.5 / epoch
 
         for fp in files:
             w, c = read_input(fp)
             if len(w) != num_vars:
                 continue
 
-            sat, flips, loss, feat_importances = solve_instance(agent, w, c, max_flips=max_flips)
+            sat, flips, loss = solve_instance(agent, w, c, max_flips=max_flips)
             cumulative_flips.append(flips)
             total_problems += 1
             if epoch == num_epochs - 1:
